@@ -11,11 +11,12 @@ from urllib3.exceptions import MaxRetryError, NewConnectionError, RequestError
 from program.apis.plex_api import PlexAPI
 from program.services.updaters.base import BaseUpdater
 from program.settings.manager import settings_manager
+from program.utils.platform_paths import normalize_path, path_is_within
 
 
 class PlexUpdater(BaseUpdater):
     def __init__(self):
-        super().__init__("plexupdater")
+        super().__init__("Plex")
         self.library_path = settings_manager.settings.updaters.library_path
         self.settings = settings_manager.settings.updaters.plex
         self.api = None
@@ -62,8 +63,9 @@ class PlexUpdater(BaseUpdater):
 
     def refresh_path(self, path: str) -> bool:
         """Refresh a specific path in Plex by finding the matching section"""
+
+        normalized = normalize_path(path)
         for section, section_paths in self.sections.items():
-            for section_path in section_paths:
-                if path.startswith(section_path):
-                    return self.api.update_section(section, path)
+            if path_is_within(normalized, section_paths):
+                return self.api.update_section(section, str(path))
         return False

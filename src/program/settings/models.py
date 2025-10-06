@@ -9,6 +9,11 @@ from RTN.models import SettingsModel
 
 from program.settings.migratable import MigratableBaseModel
 from program.utils import generate_api_key, get_version
+from program.utils.platform_paths import (
+    default_cache_root,
+    default_library_root,
+    default_mount_root,
+)
 
 deprecation_warning = (
     "This has been deprecated and will be removed in a future version."
@@ -108,14 +113,14 @@ class DownloadersModel(Observable):
 
 class FilesystemModel(Observable):
     mount_path: Path = Field(
-        default=Path("/path/to/riven/mount"),
+        default_factory=default_mount_root,
         description="Path where Riven will mount the virtual filesystem",
     )
     separate_anime_dirs: bool = Field(
         default=False, description="Create separate directories for anime content"
     )
     cache_dir: Path = Field(
-        default=Path("/dev/shm/riven-cache"),
+        default_factory=default_cache_root,
         description="Directory for caching downloaded chunks",
     )
     cache_max_size_mb: int = Field(
@@ -184,7 +189,7 @@ class UpdatersModel(Observable):
         default=120, ge=1, description="Interval in seconds between library updates"
     )
     library_path: Path = Field(
-        default=Path("/path/to/library/mount"),
+        default_factory=default_library_root,
         description="Path to which your media library mount point",
     )
     plex: PlexLibraryModel = Field(

@@ -21,7 +21,8 @@ class BaseUpdater(ABC):
         Args:
             service_name: Name of the service (e.g., "Plex", "Emby", "Jellyfin")
         """
-        self.key = service_name
+        self.key = service_name.lower()
+        self.service_name = service_name
         self.initialized = False
 
     def _initialize(self):

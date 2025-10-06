@@ -42,15 +42,18 @@ We are constantly adding features and improvements as we go along and squashing 
 
 - [Table of Contents](#table-of-contents)
 - [ElfHosted](#elfhosted)
-- [Self Hosted](#self-hosted)
+- [Native Windows Setup](#native-windows-setup)
+  - [Prerequisites](#prerequisites)
   - [Installation](#installation)
-  - [Plex](#plex)
+  - [Running the Backend](#running-the-backend)
+  - [Running the Frontend](#running-the-frontend)
+  - [Plex Libraries](#plex-libraries)
+  - [Troubleshooting](#troubleshooting)
 - [RivenVFS and Caching](#rivenvfs-and-caching)
 - [Development](#development)
-  - [Prerequisites](#prerequisites)
-  - [Initial Setup](#initial-setup)
-  - [Using `make` for Development](#using-make-for-development)
-  - [Development without `make`](#development-without-make)
+  - [Clone and Bootstrap](#clone-and-bootstrap)
+  - [Running the Backend Manually](#running-the-backend-manually)
+  - [Running Tests](#running-tests)
   - [Additional Tips](#additional-tips)
 - [Contributing](#contributing)
   - [Submitting Changes](#submitting-changes)
@@ -80,133 +83,82 @@ Curious how it works? Here's an [explainer video](https://www.youtube.com/watch?
 > -   [Hobbit Bundle](https://store.elfhosted.com/product/hobbit-riven-real-debrid-infinite-streaming-bundle) (_12.5% dedicated node, with extras_)
 > -   [Ranger Bundle](https://store.elfhosted.com/product/plex-riven-infinite-streaming-plus-bundle) (_25% dedicated node, with extras_)
 
-## Self Hosted
+## Native Windows Setup
+
+### Prerequisites
+
+- Windows 11 with the latest updates.
+- PowerShell 5.1 or PowerShell 7 (all examples below use PowerShell syntax).
+- [Python 3.11+ for Windows](https://www.python.org/downloads/windows/) with **Add python.exe to PATH** enabled during installation.
+- [Git for Windows](https://git-scm.com/download/win).
+- Optional: [Node.js 18+](https://nodejs.org/) when you plan to work on the standalone frontend.
+- Optional: Plex Media Server for Windows if you want to integrate with Plex locally.
 
 ### Installation
 
-1) Find a good place on your hard drive we can call mount from now on. For the sake of things I will call it /path/to/riven/mount.
+1. Decide where you want Riven to keep its data. The examples below assume `C:\Riven`, but you can substitute any writable location.
+2. Create the directories Riven expects by running the following in PowerShell:
 
-2) Copy over the contents of [docker-compose.yml](docker-compose.yml) to your `docker-compose.yml` file.
+   ```powershell
+   $root = 'C:\Riven'
+   New-Item -ItemType Directory -Force -Path $root, (Join-Path $root 'mount'), (Join-Path $root 'data') | Out-Null
+   ```
 
-- Modify the PATHS in the `docker-compose.yml` file volumes to match your environment. When adding /mount to any container, make sure to add `:rshared,z` to the end of the volume mount. Like this:
+3. Clone the repository and switch into it:
 
-```yaml
-volumes:
-  - /path/to/riven/data:/riven/data
-  - /path/to/riven/mount:/mount:rshared,z
+   ```powershell
+   git clone https://github.com/rivenmedia/riven.git
+   Set-Location riven
+   ```
+
+4. Allow scripts for the current session (if you have not already) and launch the backend bootstrapper:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+   .\scripts\Start-Backend.ps1 -IncludeDevDependencies
+   ```
+
+   The script provisions a `.venv` directory, installs Poetry, restores dependencies (including the optional developer extras when `-IncludeDevDependencies` is supplied), and starts the FastAPI backend on port `8080`. Press <kbd>Ctrl</kbd>+<kbd>C</kbd> to stop it when you are finished.
+
+5. In the Riven web UI, set the Filesystem mount path to the directory you created earlier (for example `C:\Riven\mount`). Any folders you create under that mount path (`movies`, `shows`, and so on) will be exposed to Plex and other media servers.
+
+### Running the Backend
+
+Whenever you want to bring Riven online, open PowerShell in the repository root and run:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+./scripts/Start-Backend.ps1
 ```
 
-3) Make your mount directory a bind mount and mark it shared (run once per boot):
+Use `-Port <number>` to choose a different listening port, `-SkipInstall` when you only want to reuse the existing virtual environment, and `-EnableDebugger` to opt into extra debugging output.
 
-```bash
-sudo mkdir -p /path/to/riven/mount
-sudo mount --bind /path/to/riven/mount /path/to/riven/mount
-sudo mount --make-rshared /path/to/riven/mount
+### Running the Frontend
+
+The backend bundles the settings UI, but you can also run the standalone frontend when you want hot reloading or to work on UI changes. After cloning the UI repository next to this one (for example `C:\Riven\frontend`), run:
+
+```powershell
+./scripts/Start-Frontend.ps1 -FrontendPath ..\frontend
 ```
 
-- Verify propagation:
+The script picks `npm` by default. Override it with `-PackageManager pnpm`, `-PackageManager yarn`, or `-PackageManager bun` if you use an alternative toolchain. Forward additional CLI flags with `-ScriptArguments "-- --host localhost --port 3000"`.
 
-```bash
-findmnt -T /path/to/riven/mount -o TARGET,PROPAGATION  # expect: shared or rshared
-```
+### Plex Libraries
 
-> [!TIP]
-> **Make it automatic on boot**
->
->- Option A – systemd one-shot unit:
->
->```ini
->[Unit]
->Description=Make Riven data bind mount shared
->After=local-fs.target
->Before=docker.service
->
->[Service]
->Type=oneshot
->ExecStart=/usr/bin/mount --bind /path/to/riven/mount /path/to/riven/mount
->ExecStart=/usr/bin/mount --make-rshared /path/to/riven/mount
->RemainAfterExit=yes
->
->[Install]
->WantedBy=multi-user.target
->```
->
->Enable it:
->
->```bash
->sudo systemctl enable --now riven-bind-shared.service
->```
->
->- Option B – fstab entry:
->
->```fstab
->/path/to/riven/mount  /path/to/riven/mount  none  bind,rshared  0  0
->```
->
->Notes:
->- Keep your FUSE mount configured with allow_other (Dockerfile sets user_allow_other in /etc/fuse.conf so you dont have to).
->- On SELinux systems, add :z to the bind mount if needed.
-
-
-## Plex
-
-Plex libraries that are currently required to have sections:
+Create the library folders you want Plex to index beneath your chosen mount directory. Riven expects the following sections to exist:
 
 | Type   | Categories               |
 | ------ | ------------------------ |
 | Movies | `movies`, `anime_movies` |
 | Shows  | `shows`, `anime_shows`   |
 
-> [!NOTE]
-> Currently, these Plex library requirements are mandatory. However, we plan to make them customizable in the future to support additional libraries as per user preferences.
+Point Plex at the same Windows paths that Riven uses (for example `C:\Riven\mount\movies`). Keeping the paths identical between Riven and Plex avoids sync issues.
 
+### Troubleshooting
 
-### Troubleshooting: Plex shows empty /mount after Riven restart
-
-If Plex’s library path appears empty inside the Plex container after restarting Riven/RivenVFS, it’s almost always mount propagation and/or timing. Use the steps below to diagnose and fix without restarting Plex.
-
-1) Verify the host path is shared (required)
-
-- Mark your host mount directory as a shared bind mount (one-time per boot):
-
-```bash
-sudo mkdir -p /path/to/riven/mount
-sudo mount --bind /path/to/riven/mount /path/to/riven/mount
-sudo mount --make-rshared /path/to/riven/mount
-findmnt -T /path/to/riven/mount -o TARGET,PROPAGATION  # expect: shared or rshared
-```
-
-2) Verify propagation inside the Plex container
-
-- The container must also receive mount events recursively (rslave or rshared):
-
-```bash
-docker exec -it plex sh -c 'findmnt -T /mount -o TARGET,PROPAGATION,OPTIONS,FSTYPE'
-# PROPAGATION should be rslave or rshared, FSTYPE should show fuse when RivenVFS is mounted
-```
-
-- In docker-compose for Plex, ensure the bind includes mount propagation (and SELinux label if needed):
-
-```yaml
-  - /path/to/riven/mount:/mount:rslave,z
-```
-
-3) Ensure the path Riven mounts to is the container path
-
-- In Riven settings, set the Filesystem mount path to the container path (typically `/mount`), not the host path. Both Riven (if containerized) and Plex should refer to the same in-container path for their libraries (e.g., `/mount/movies`, `/mount/shows`).
-
-4) Clear a stale FUSE mount (after crashes)
-
-- If a previous FUSE instance didn’t unmount cleanly on the host, a stale mount can block remounts.
-
-```bash
-sudo fusermount -uz /path/to/riven/mount || sudo umount -l /path/to/riven/mount
-# then start Riven again
-```
-
-6) Expected behavior during restart window
-
-- When Riven stops, the FUSE mount unmounts and `/mount` may briefly appear empty inside the container; it will become FUSE again when Riven remounts. With proper propagation (host rshared + container rslave/rshared) and startup order, Plex should see the content return automatically without a restart. Enabling Plex’s “Automatically scan my library” can also help it pick up changes.
+- **Riven UI cannot see your media folders:** Confirm the path in *Settings → Filesystem* matches the directory you created earlier (for example `C:\Riven\mount`). Use `Test-Path 'C:\Riven\mount'` in PowerShell to verify it exists.
+- **Plex does not detect new files:** Make sure Plex is pointed at the exact same Windows path as Riven and that your Windows account has permission to read the folders. Trigger a library refresh from Plex after the first sync.
+- **Need a clean restart:** Close the PowerShell window running Riven or press <kbd>Ctrl</kbd>+<kbd>C</kbd>, then rerun `./scripts/Start-Backend.ps1`.
 
 ## RivenVFS and Caching
 
@@ -223,89 +175,60 @@ sudo fusermount -uz /path/to/riven/mount || sudo umount -l /path/to/riven/mount
 
 ## Development
 
-Welcome to the development section! Here, you'll find all the necessary steps to set up your development environment and start contributing to the project.
+Welcome to the development section! Here, you'll find the steps required to set up a native Windows environment and start contributing to the project.
 
-### Prerequisites
+### Clone and Bootstrap
 
-Ensure you have the following installed on your system:
+1. **Clone the Repository**
 
--   **Python** (3.10+)
+   ```powershell
+   git clone https://github.com/rivenmedia/riven.git
+   Set-Location riven
+   ```
 
-### Initial Setup
+2. **Provision the Virtual Environment**
 
-1. **Clone the Repository:**
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+   ./scripts/Start-Backend.ps1 -IncludeDevDependencies
+   ```
 
-    ```sh
-    git clone https://github.com/rivenmedia/riven.git && cd riven
-    ```
+   Running the script once sets up the `.venv` directory, installs Poetry, restores dependencies (including the developer extras), and starts the backend. Use <kbd>Ctrl</kbd>+<kbd>C</kbd> to stop it after the install completes.
 
-2. **Install Dependencies:**
+### Running the Backend Manually
 
-    ```sh
-    apk add --no-cache \
-    openssl-dev \
-    fuse3-dev \
-    pkgconf \
-    fuse3
-    ```
+After the initial bootstrap you can control the backend directly from PowerShell:
 
-3. **Install Python Dependencies:**
+```powershell
+.\.venv\Scripts\Activate.ps1
+poetry run python src/main.py --port 8080
+deactivate
+```
 
-    ```sh
-    pip install poetry
-    poetry install
-    ```
+Adjust the `--port` argument as needed. Activating the virtual environment first ensures `poetry` and the project dependencies resolve correctly.
 
-### Using `make` for Development
+### Running Tests
 
-We provide a `Makefile` to simplify common development tasks. Here are some useful commands:
+Activate the virtual environment and invoke the test suite through Poetry:
 
--   **Initialize the Project:**
+```powershell
+.\.venv\Scripts\Activate.ps1
+poetry run pytest
+deactivate
+```
 
-    ```sh
-    make
-    ```
-
--   **Start the Development Environment:**
-    This command stops any previous containers, removes old images, and rebuilds the image using cached layers. Any changes in the code will trigger a rebuild.
-
-    ```sh
-    make start
-    ```
-
--   **Restart the Container:**
-
-    ```sh
-    make restart
-    ```
-
--   **View Logs:**
-    ```sh
-    make logs
-    ```
-
-### Development without `make`
-
-If you prefer not to use `make` and Docker, you can manually set up the development environment with the following steps:
-
-1. **Start Riven:**
-
-    ```sh
-    poetry run python src/main.py
-    ```
+Pass additional arguments (for example `poetry run pytest src/tests/test_updaters.py`) to narrow the scope during development.
 
 ### Additional Tips
 
--   **Environment Variables:**
-    Ensure you set the `ORIGIN` environment variable to the URL where the frontend will be accessible. For example:
+- **Environment Variables:** Set the `ORIGIN` environment variable to the URL where the frontend will be accessible.
 
-    ```sh
-    export ORIGIN=http://localhost:3000
-    ```
+  ```powershell
+  $Env:ORIGIN = 'http://localhost:3000'
+  ```
 
-By following these guidelines, you'll be able to set up your development environment smoothly and start contributing to the project. Happy coding!
-
----
+- **Dependency Tweaks:** Re-run `./scripts/Start-Backend.ps1 -IncludeDevDependencies` after modifying `pyproject.toml` to make sure the lock file and virtual environment stay in sync.
+- **Frontend Workflows:** Use `./scripts/Start-Frontend.ps1` for hot reloading and pass `-ScriptArguments` to forward flags directly to the underlying package manager.
 
 ## Contributing
 
