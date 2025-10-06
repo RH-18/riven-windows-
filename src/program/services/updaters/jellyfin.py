@@ -10,7 +10,7 @@ class JellyfinUpdater(BaseUpdater):
     """Jellyfin media server updater implementation"""
 
     def __init__(self):
-        super().__init__("jellyfin")
+        super().__init__("Jellyfin")
         self.settings = settings_manager.settings.updaters.jellyfin
         self.session = SmartSession(retries=3, backoff_factor=0.3)
         self._initialize()

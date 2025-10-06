@@ -10,7 +10,7 @@ class EmbyUpdater(BaseUpdater):
     """Emby media server updater implementation"""
 
     def __init__(self):
-        super().__init__("emby")
+        super().__init__("Emby")
         self.settings = settings_manager.settings.updaters.emby
         self.session = SmartSession(retries=3, backoff_factor=0.3)
         self._initialize()

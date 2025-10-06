@@ -1,6 +1,7 @@
 """Test suite for updater services"""
+from pathlib import Path, PurePosixPath
 import os
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -10,6 +11,12 @@ from program.services.updaters.emby import EmbyUpdater
 from program.services.updaters.jellyfin import JellyfinUpdater
 from program.services.updaters.plex import PlexUpdater
 
+LIBRARY_ROOT = Path("C:/Riven/Library") if os.name == "nt" else Path("/mnt/library")
+MOVIE_SECTION = LIBRARY_ROOT / "movies"
+SHOW_SECTION = LIBRARY_ROOT / "shows"
+MOVIE_ITEM_PATH = MOVIE_SECTION / "Test Movie (2020)"
+EPISODE_ITEM_PATH = SHOW_SECTION / "Test Show" / "Season 01" / "Test Show S01E01.mkv"
+
 
 # Fixtures for test media items
 @pytest.fixture
@@ -18,7 +25,7 @@ def mock_movie():
     movie = Mock(spec=Movie)
     movie.type = "movie"
     movie.filesystem_entry = Mock()
-    movie.filesystem_entry.path = "/movies/Test Movie (2020)/Test Movie (2020).mkv"
+    movie.filesystem_entry.path = str(PurePosixPath("/movies/Test Movie (2020)/Test Movie (2020).mkv"))
     movie.updated = False
     movie.log_string = "Test Movie (2020)"
     return movie
@@ -30,7 +37,7 @@ def mock_episode():
     episode = Mock(spec=Episode)
     episode.type = "episode"
     episode.filesystem_entry = Mock()
-    episode.filesystem_entry.path = "/shows/Test Show/Season 01/Test Show S01E01.mkv"
+    episode.filesystem_entry.path = str(PurePosixPath("/shows/Test Show/Season 01/Test Show S01E01.mkv"))
     episode.updated = False
     episode.log_string = "Test Show S01E01"
     return episode
@@ -42,7 +49,7 @@ def mock_show():
     show = Mock(spec=Show)
     show.type = "show"
     show.filesystem_entry = Mock()
-    show.filesystem_entry.path = "/shows/Test Show/Season 01/Test Show S01E01.mkv"
+    show.filesystem_entry.path = str(PurePosixPath("/shows/Test Show/Season 01/Test Show S01E01.mkv"))
     show.updated = False
     show.log_string = "Test Show"
     return show
@@ -60,7 +67,7 @@ def mock_settings():
         mock_plex_settings.settings.updaters.plex.enabled = False
         mock_plex_settings.settings.updaters.plex.token = "test_token"
         mock_plex_settings.settings.updaters.plex.url = "http://localhost:32400"
-        mock_plex_settings.settings.updaters.library_path = "/mnt/library"
+        mock_plex_settings.settings.updaters.library_path = LIBRARY_ROOT
         
         # Emby settings
         mock_emby_settings.settings.updaters.emby.enabled = False
@@ -73,7 +80,7 @@ def mock_settings():
         mock_jellyfin_settings.settings.updaters.jellyfin.url = "http://localhost:8097"
         
         # Main updater settings
-        mock_main_settings.settings.updaters.library_path = "/mnt/library"
+        mock_main_settings.settings.updaters.library_path = LIBRARY_ROOT
         
         yield {
             "plex": mock_plex_settings,
@@ -119,17 +126,17 @@ class TestPlexUpdater:
             mock_section.key = "1"
             mock_section.title = "Movies"
             mock_section.type = "movie"
-            mock_section.locations = ["/mnt/library/movies"]
-            
-            mock_api.map_sections_with_paths.return_value = {mock_section: ["/mnt/library/movies"]}
+            mock_section.locations = [str(MOVIE_SECTION)]
+
+            mock_api.map_sections_with_paths.return_value = {mock_section: [str(MOVIE_SECTION)]}
             mock_api.update_section.return_value = True
             mock_di.__getitem__.return_value = mock_api
-            
+
             updater = PlexUpdater()
-            result = updater.refresh_path("/mnt/library/movies/Test Movie (2020)")
-            
+            result = updater.refresh_path(str(MOVIE_ITEM_PATH))
+
             assert result is True
-            mock_api.update_section.assert_called_once_with(mock_section, "/mnt/library/movies/Test Movie (2020)")
+            mock_api.update_section.assert_called_once_with(mock_section, str(MOVIE_ITEM_PATH))
     
     def test_refresh_path_no_matching_section(self, mock_settings):
         """Test refresh_path when no section matches the path"""
@@ -142,7 +149,7 @@ class TestPlexUpdater:
             mock_di.__getitem__.return_value = mock_api
             
             updater = PlexUpdater()
-            result = updater.refresh_path("/mnt/library/movies/Test Movie (2020)")
+            result = updater.refresh_path(str(MOVIE_ITEM_PATH))
             
             assert result is False
 
@@ -177,13 +184,13 @@ class TestEmbyUpdater:
             mock_response.ok = True
             mock_post.return_value = mock_response
             
-            result = updater.refresh_path("/mnt/library/movies/Test Movie (2020)")
+            result = updater.refresh_path(str(MOVIE_ITEM_PATH))
             
             assert result is True
             mock_post.assert_called_once()
             call_args = mock_post.call_args
             assert "/Library/Media/Updated" in call_args[0][0]
-            assert call_args[1]["json"]["Updates"][0]["Path"] == "/mnt/library/movies/Test Movie (2020)"
+            assert call_args[1]["json"]["Updates"][0]["Path"] == str(MOVIE_ITEM_PATH)
     
     def test_refresh_path_failure(self, mock_settings):
         """Test failed path refresh"""
@@ -196,7 +203,7 @@ class TestEmbyUpdater:
             mock_response.ok = False
             mock_post.return_value = mock_response
             
-            result = updater.refresh_path("/mnt/library/movies/Test Movie (2020)")
+            result = updater.refresh_path(str(MOVIE_ITEM_PATH))
             
             assert result is False
 
@@ -261,7 +268,7 @@ class TestUpdater:
         """Test Updater initialization"""
         updater = Updater()
         assert updater.key == "updater"
-        assert updater.library_path == "/mnt/library"
+        assert Path(updater.library_path) == LIBRARY_ROOT
         assert PlexUpdater in updater.services
         assert EmbyUpdater in updater.services
         assert JellyfinUpdater in updater.services
@@ -291,7 +298,29 @@ class TestUpdater:
                 list(updater.run(mock_movie))
 
                 # For movies, should refresh parent directory
-                expected_path = "/mnt/library/movies/Test Movie (2020)"
+                expected_path = str(MOVIE_ITEM_PATH)
+                mock_refresh.assert_called_once_with(expected_path)
+                assert mock_movie.updated is True
+
+    def test_run_movie_windows_style_path(self, mock_settings, mock_movie):
+        """Ensure Windows-style relative paths resolve correctly."""
+
+        mock_settings["emby"].settings.updaters.emby.enabled = True
+        windows_root = r"C:\Riven\Library"
+        for key in ("plex", "emby", "jellyfin", "main"):
+            mock_settings[key].settings.updaters.library_path = windows_root
+
+        mock_movie.filesystem_entry.path = (
+            "\\movies\\Test Movie (2020)\\Test Movie (2020).mkv"
+        )
+
+        with patch.object(EmbyUpdater, "validate", return_value=True):
+            updater = Updater()
+
+            with patch.object(updater, "refresh_path") as mock_refresh:
+                list(updater.run(mock_movie))
+
+                expected_path = r"C:\Riven\Library\movies\Test Movie (2020)"
                 mock_refresh.assert_called_once_with(expected_path)
                 assert mock_movie.updated is True
 
@@ -306,7 +335,29 @@ class TestUpdater:
                 list(updater.run(mock_episode))
 
                 # For episodes, should refresh parent's parent (show folder, not season)
-                expected_path = "/mnt/library/shows/Test Show"
+                expected_path = str(SHOW_SECTION / "Test Show")
+                mock_refresh.assert_called_once_with(expected_path)
+                assert mock_episode.updated is True
+
+    def test_run_episode_windows_style_path(self, mock_settings, mock_episode):
+        """Episodes with Windows separators resolve to the show directory."""
+
+        mock_settings["emby"].settings.updaters.emby.enabled = True
+        windows_root = r"C:\Riven\Library"
+        for key in ("plex", "emby", "jellyfin", "main"):
+            mock_settings[key].settings.updaters.library_path = windows_root
+
+        mock_episode.filesystem_entry.path = (
+            "\\shows\\Test Show\\Season 01\\Test Show S01E01.mkv"
+        )
+
+        with patch.object(EmbyUpdater, "validate", return_value=True):
+            updater = Updater()
+
+            with patch.object(updater, "refresh_path") as mock_refresh:
+                list(updater.run(mock_episode))
+
+                expected_path = r"C:\Riven\Library\shows\Test Show"
                 mock_refresh.assert_called_once_with(expected_path)
                 assert mock_episode.updated is True
 
@@ -418,7 +469,7 @@ class TestUpdaterIntegration:
                 # Verify Emby was called with correct path
                 mock_post.assert_called_once()
                 call_args = mock_post.call_args
-                assert call_args[1]["json"]["Updates"][0]["Path"] == "/mnt/library/movies/Test Movie (2020)"
+                assert call_args[1]["json"]["Updates"][0]["Path"] == str(MOVIE_ITEM_PATH)
 
     def test_show_workflow(self, mock_settings, mock_show):
         """Test complete workflow for updating a show"""
@@ -445,5 +496,5 @@ class TestUpdaterIntegration:
                 # Verify Emby was called with show folder (not season folder)
                 mock_post.assert_called_once()
                 call_args = mock_post.call_args
-                assert call_args[1]["json"]["Updates"][0]["Path"] == "/mnt/library/shows/Test Show"
+                assert call_args[1]["json"]["Updates"][0]["Path"] == str(SHOW_SECTION / "Test Show")
 
